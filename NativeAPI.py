@@ -9,6 +9,7 @@ import _version
 import logging
 import credentials
 from vsr import VSR
+import re
 
 logging.basicConfig(format='[%(asctime)s] [%(name)s::%(levelname)s] %(message)s', datefmt='%d/%m/%Y %H:%M:%S')
 
@@ -316,30 +317,61 @@ class WeConnect():
 
             upr = urlparse(r.url)
             r = self.__get_url(upr.scheme+'://'+upr.netloc+form_url, post=post)
-            soup = BeautifulSoup(r.text, 'html.parser')
-            form = soup.find('form', {'id': 'credentialsForm'})
-            if (not form):
-                form = soup.find('form', {'id': 'emailPasswordForm'})
-                if (form):
-                    span = form.find('span', { 'class': 'message'})
-                    e = 'Cannot login. Unknown error.'
-                    if (span):
-                        e = span.text
-                    else:
-                        div = form.find('div', {'class': 'sub-title'})
-                        if (div):
-                            e = div.text
-                    raise VWError(e)
-                raise VWError('This account does not exist')
-            if (not form.has_attr('action')):
-                raise VWError('action not found in login password form. Cannot continue')
-            form_url = form['action']
-            logger.info('Found password login url: %s', form_url)
-            hiddn = form.find_all('input', {'type': 'hidden'})
-            post = {}
-            for h in hiddn:
-                post[h['name']] = h['value']
+
+## BUGFIX
+#           this part of code is adopted from the github-code @ tillsteinbach/WeConnect-python
+
+            credentialsTemplateRegex = r'<script>\s+window\._IDK\s+=\s+\{\s' \
+                r'(?P<templateModel>.+?(?=\s+\};\s+</script>))\s+\};\s+</script>'
+            match = re.search(credentialsTemplateRegex, r.text, flags=re.DOTALL)
+
+            if match.groupdict()['templateModel']:
+                lineRegex = r'\s*(?P<name>[^\:]+)\:\s+[\'\{]?(?P<value>.+)[\'\}][,]?'
+                post = {}
+                for match in re.finditer(lineRegex, match.groupdict()['templateModel']):
+                    if match.groupdict()['name'] == 'templateModel':
+                        templateModelString = '{' + match.groupdict()['value'] + '}'
+                        if templateModelString.endswith(','):
+                            templateModelString = templateModelString[:-len(',')]
+                        templateModel = json.loads(templateModelString)
+                        if 'relayState' in templateModel:
+                            post['relayState'] = templateModel['relayState']
+                        if 'hmac' in templateModel:
+                            post['hmac'] = templateModel['hmac']
+                        if 'postAction' in templateModel:
+                            form_url = '/signin-service/v1/'+login_para['client_id']+'/'+templateModel['postAction']
+                        if 'emailPasswordForm' in templateModel and 'email' in templateModel['emailPasswordForm']:
+                            post['email'] = templateModel['emailPasswordForm']['email']
+                        if 'errorCode' in templateModel:
+                            raise VWError(templateModel['errorCode'])
+                    elif match.groupdict()['name'] == 'csrf_token':
+                        post['_csrf'] = match.groupdict()['value']
             post['password'] = self.__credentials['password']
+
+#            soup = BeautifulSoup(r.text, 'html.parser')
+#            form = soup.find('form', {'id': 'credentialsForm'})
+#            if (not form):
+#                form = soup.find('form', {'id': 'emailPasswordForm'})
+#                if (form):
+#                    span = form.find('span', { 'class': 'message'})
+#                    e = 'Cannot login. Unknown error.'
+#                    if (span):
+#                        e = span.text
+#                    else:
+#                        div = form.find('div', {'class': 'sub-title'})
+#                        if (div):
+#                            e = div.text
+#                    raise VWError(e)
+#                raise VWError('This account does not exist')
+#            if (not form.has_attr('action')):
+#                raise VWError('action not found in login password form. Cannot continue')
+#            form_url = form['action']
+#            logger.info('Found password login url: %s', form_url)
+#            hiddn = form.find_all('input', {'type': 'hidden'})
+#            post = {}
+#            for h in hiddn:
+#                post[h['name']] = h['value']
+#            post['password'] = self.__credentials['password']            
 
             upr = urlparse(r.url)
             r = self.__get_url(upr.scheme+'://'+upr.netloc+form_url, post=post)
