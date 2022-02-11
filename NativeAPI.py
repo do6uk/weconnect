@@ -3,7 +3,7 @@
 Created on Thu Dec 30 19:41:00 2021
 
 @author: Trocotronic
-@modified: do6uk
+@modified: do6uk	2022-02-11
 """
 import _version
 import logging
@@ -29,7 +29,7 @@ class UrlError(VWError):
         super().__init__(message)
     pass
 
-import requests, pickle, hashlib, base64, os, random, time, json, xmltodict
+import requests, pickle, hashlib, base64, os, random, time, json, xmltodict, re
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, unquote_plus
 
@@ -318,68 +318,28 @@ class WeConnect():
             upr = urlparse(r.url)
             r = self.__get_url(upr.scheme+'://'+upr.netloc+form_url, post=post)
 
-## BUGFIX
-#           this part of code is adopted from the github-code @ tillsteinbach/WeConnect-python
+            soup = BeautifulSoup(r.text, 'html.parser')
+            scripts = soup.find_all('script')
+            for script in scripts:
+                if script.string and 'window._IDK' in script.string:
+                    try:
+                        idk_txt = '{'+re.search(r'\{(.*)\}',script.string,re.M|re.S).group(1)+'}'
+                        idk_txt = re.sub(r'([\{\s,])(\w+)(:)', r'\1"\2"\3', idk_txt.replace('\'','"'))
+                        idk = json.loads(idk_txt)
+                        break
+                    except json.decoder.JSONDecodeError:
+                        raise VWError('Cannot find IDK credentials')
 
-            credentialsTemplateRegex = r'<script>\s+window\._IDK\s+=\s+\{\s' \
-                r'(?P<templateModel>.+?(?=\s+\};\s+</script>))\s+\};\s+</script>'
-            match = re.search(credentialsTemplateRegex, r.text, flags=re.DOTALL)
-
-            if match.groupdict()['templateModel']:
-                lineRegex = r'\s*(?P<name>[^\:]+)\:\s+[\'\{]?(?P<value>.+)[\'\}][,]?'
-                post = {}
-                for match in re.finditer(lineRegex, match.groupdict()['templateModel']):
-                    if match.groupdict()['name'] == 'templateModel':
-                        templateModelString = '{' + match.groupdict()['value'] + '}'
-                        if templateModelString.endswith(','):
-                            templateModelString = templateModelString[:-len(',')]
-                        templateModel = json.loads(templateModelString)
-                        if 'relayState' in templateModel:
-                            post['relayState'] = templateModel['relayState']
-                        if 'hmac' in templateModel:
-                            post['hmac'] = templateModel['hmac']
-                        if 'postAction' in templateModel:
-                            form_url = '/signin-service/v1/'+login_para['client_id']+'/'+templateModel['postAction']
-                        if 'emailPasswordForm' in templateModel and 'email' in templateModel['emailPasswordForm']:
-                            post['email'] = templateModel['emailPasswordForm']['email']
-                        if 'errorCode' in templateModel:
-                            raise VWError(templateModel['errorCode'])
-                    elif match.groupdict()['name'] == 'csrf_token':
-                        post['_csrf'] = match.groupdict()['value']
+            post['hmac'] = idk['templateModel']['hmac']
             post['password'] = self.__credentials['password']
 
-#            soup = BeautifulSoup(r.text, 'html.parser')
-#            form = soup.find('form', {'id': 'credentialsForm'})
-#            if (not form):
-#                form = soup.find('form', {'id': 'emailPasswordForm'})
-#                if (form):
-#                    span = form.find('span', { 'class': 'message'})
-#                    e = 'Cannot login. Unknown error.'
-#                    if (span):
-#                        e = span.text
-#                    else:
-#                        div = form.find('div', {'class': 'sub-title'})
-#                        if (div):
-#                            e = div.text
-#                    raise VWError(e)
-#                raise VWError('This account does not exist')
-#            if (not form.has_attr('action')):
-#                raise VWError('action not found in login password form. Cannot continue')
-#            form_url = form['action']
-#            logger.info('Found password login url: %s', form_url)
-#            hiddn = form.find_all('input', {'type': 'hidden'})
-#            post = {}
-#            for h in hiddn:
-#                post[h['name']] = h['value']
-#            post['password'] = self.__credentials['password']            
-
             upr = urlparse(r.url)
-            r = self.__get_url(upr.scheme+'://'+upr.netloc+form_url, post=post)
+            r = self.__get_url(upr.scheme+'://'+upr.netloc+form_url.replace(idk['templateModel']['identifierUrl'],idk['templateModel']['postAction']), post=post)
             if ('carnet://' not in r.url):
                 logger.info('No carnet scheme found in response.')
                 soup = BeautifulSoup(r.text, 'html.parser')
                 metakits = soup.find_all("meta", {'name':'identitykit'})
-                print(metakits)
+
                 for metakit in metakits:
                     if (metakit['content'] == 'termsAndConditions'): #updated terms and conditions?
                         logger.debug('Meta identitykit is termsandconditions')

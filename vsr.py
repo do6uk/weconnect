@@ -4,6 +4,7 @@
 Created on Mon Jun 28 00:08:42 2021
 
 @author: trocotronic
+@modified: do6uk	2022-02-11
 """
 
 import logging
@@ -12,6 +13,7 @@ class VSR:
     __vsr_fields = [
         ('0x0101010001', '0x0101010001', 'status', 'utc_time'),
         ('0x0101010002', '0x0101010002', 'status', 'distance_covered'),
+        ('0x0202FFFFFF', '0x020203A227', 'status', 'washer_fluid_warning'),
         ('0x0203FFFFFF', '0x0203010001', 'intervals', 'distance_to_oil_change'),
         ('0x0203FFFFFF', '0x0203010002', 'intervals', 'time_to_oil_change'),
         ('0x0203FFFFFF', '0x0203010003', 'intervals', 'distance_to_inspection'),
